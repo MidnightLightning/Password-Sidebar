@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+ 
+<head>
+	<title>Password-generating sidebar</title>
+	<meta http-equiv="content-type" content="text/html;charset=utf-8" />
+	<meta http-equiv="content-style-type" content="text/css" />
+	<style type="text/css">
+		body { font-size:10pt; }
+		div#wrapper { max-width: 600px; margin:0 auto; }
+		table#setup { width:100%; }
+		table#setup th { text-align:right; padding:0.25em 0 0.25em 0.125em; }
+		table#setup input { width:95%; }
+		div#chart { margin:0.5em 0; }
+		div.translation { width:5em; float:left; }
+		div.translation .input { font-weight:bold; font-family:Arial,sans-serif; display:block; text-align:right; padding-right:0.25em; width:1.5em; float:left; }
+		div.translation .output { font-family:"Courier New",monospace; }
+		div#password { background:#CFC; border:solid 1px #060; -moz-border-radius:5px; text-align:center; padding:0.25em 0.5em; margin:0.5em 0; }
+		div#password .output { font-family:"Courier New",monospace; font-weight:bold; font-size:12pt; }
+	</style>
+	<script type="text/javascript">
+		///// Uncomment the 'pool' variable definition you'd like to use, or customize your own
+		//var pool = ['ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz']; // Just alphabet characters
+		//var pool = ['ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnopqrstuvwxyz']; // Remove capital i, o, and lower-case L, since they are easily mistaken for other symbols
+		//var pool = ['ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz','0123456789']; // Alphabet and numeric symbols
+		//var pool = ['ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnopqrstuvwxyz','23456789']; // Remove capital i, o, lower-case L, zero and one, since they are easily mistaken for other symbols
+		var pool = ['ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz','0123456789','!@#$%^&*()']; // Add basic symbols
+		//var pool = ['ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz','0123456789','!@#$%^&*()-_=+[]{};:,.<>/\|?`~']; // Add complex symbols
+		
+		var inputs = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'; // What characters are inputs?
+		var mixed_case_input = false; // Does the input differentiate between cases? If the 'inputs' variable has mixed case, and this variable is set to 'true', then an input of "password" will generate a different encryption than "PaSsWoRd"
+		var min_chars = 1; // For each of the input characters, what's the minimum number of characters it can translate to?
+		var max_chars = 3; // For each of the input characters, what's the maximum number of characters it can translate to?
+		
+		///// No user customization needed past here! 
+		var translation = [];
+		var width = 10; // each RC4 output is 0 <= x < width
+		for (var i = 0; i < pool.length; i++) {
+			if (pool[i].length > width) width = pool[i].length; // Ensure width is longer than longest pool sub-group
+		}
+		var pools_max = width - (width % pool.length); // highest number less than or equal to 'width' that's an even multiple of the number of pool groups
+		var myArc = {};
+		
+		// An ARC4 implementation.  The constructor takes a key in the form of
+		// an array of at most 'width' integers that should be 0 <= x < 'width'.
+		// Borrowed from http://davidbau.com/archives/2010/01/30/random_seeds_coded_hints_and_quintillions.html
+		//
+		// The g(count) method returns a pseudorandom integer that concatenates
+		// the next (count) outputs from ARC4.  Its return value is a number x
+		// that is in the range 0 <= x < (width ^ count).
+		function ARC4(key) {
+			var t, u, me = this, keylen = key.length;
+			var i = 0, j = me.i = me.j = me.m = 0;
+			me.S = [];
+			me.c = [];
+			
+			// The empty key [] is treated as [0].
+			if (!keylen) key = [keylen++];
+			
+			// Set up S using the standard key scheduling algorithm.
+			while (i < width) me.S[i] = i++;
+			for (i = 0; i < width; i++) {
+				t = me.S[i];
+				j = (j + t + key[(i % keylen)]) % width;
+				u = me.S[j];
+				me.S[i] = u;
+				me.S[j] = t;
+			}
+			
+			// The "g" method returns the next 'count' outputs as one number.
+			me.g = function getnext(count) {
+				var s = me.S;
+				var i = (me.i + 1) % width; var t = s[i];
+				var j = (me.j + t) % width; var u = s[j];
+				s[i] = u;
+				s[j] = t;
+				var r = s[(t + u) % width];
+				while (--count) {
+					i = (i + 1) % width; t = s[i];
+					j = (j + t) % width; u = s[j];
+					s[i] = u;
+					s[j] = t;
+					r = r * width + s[(t + u) % width];
+				}
+				me.i = i;
+				me.j = j;
+				return r;
+			}
+			// For robust unpredictability discard an initial batch of values.
+			// See http://www.rsa.com/rsalabs/node.asp?id=2009
+			me.g(width);
+		}
+		
+		// Take a string, and convert it to a key that is an array of integers, for the ARC4 constructor function
+		function strtokey(seed) {
+			seed += ''; // Ensure seed is a string
+			var smear = 0;
+			var key = [];
+			for (j = 0; j < seed.length; j++) {
+				var index = (j > width) ? j & width : j;
+				key[index] = ((smear ^= key[index] * 19) + seed.charCodeAt(j)) % width;
+			}
+			return key;
+		}
+		
+		// This function triggers when the "seed" field element is updated, regenerating the encryption chart
+		function generate_hash() {
+			var seed = document.getElementById('seed').value; // The user's input seed
+			if (seed.length > 0) {
+				myArc = new ARC4(strtokey(seed));
+
+				// Generate an output for each input
+				translation = []; // Clear existing
+				for (i = 0; i < inputs.length; i++) {
+					// Determine a value for each input
+					// Values from the ARC4 generator are used thusly:
+					//   1. how many characters long should the encoded value be?
+					//   2. which pool sub-group should be used?
+					//   3. if number generated introduces bias, discard it and go back to 2; repeat until a valid number is drawn
+					//   4. which character from that sub-pool should be used?
+					//   5. if number generated introduces bias, discard it and go back to 4; repeat until a valid number is drawn
+					//   6. repeat back to step 2 for a number of times equal to the value determined in 1
+					// Therefore, each encoded input character uses at least 3 values from the ARC4 generator
+					var char_num = (myArc.g(1) % (max_chars-min_chars+1))+min_chars; // Trim down to a number between 'min_chars' and 'max_chars' (inclusive); could possibly have a very slight bias towards the smaller values of the range
+					var encoded = '';
+					for (j = 0; j < char_num; j++) {
+						// determine which pool sub-group to pull from
+						var pool_group = myArc.g(1);
+						while (pool_group > pools_max) pool_group = myArc.g(1); // Discard top biases
+						var pool_group = pool_group % pool.length;
+						
+						tmp = myArc.g(1);
+						while (tmp >= pool[pool_group].length) tmp = myArc.g(1); // Discard numbers longer than the length of the sub-group
+						encoded += pool[pool_group].charAt(tmp);
+					}
+					translation[i] = encoded;
+				}
+				
+				// Show chart
+				var chart = '';
+				for (i=0; i < inputs.length; i++) {
+					chart += '<div class="translation"><span class="input">'+inputs.charAt(i)+':</span><span class="output">'+translation[i]+"</span></div>\n";
+				}				
+				document.getElementById('chart').innerHTML = chart;
+				
+				if (document.getElementById('passwd').value.length > 0) {
+					generate_pass(); // re-create password with this hash
+				}
+			} else {
+				// Blank the chart
+				document.getElementById('chart').innerHTML = "Input a seed above";
+				document.getElementById('password').style.display = 'none';
+			}
+		}
+		
+		// This function triggers when the "input" field element is updated, creating a password by passing the input through the current hash
+		function generate_pass() {
+			var pass = document.getElementById('passwd').value;
+			if (!mixed_case_input) pass = pass.toUpperCase(); // Translate to upper-case if we're not caring about case
+			if (pass.length > 0 && translation.length > 0) {
+				// Determine a value for each input
+				var output = "";
+				for (var i = 0; i < pass.length; i++) {
+					curChar = pass.charAt(i);
+					// Find this character in the input array
+					var inputIndex = -1;
+					for (var j = 0; j < inputs.length; j++) {
+						if (inputs.charAt(j) == curChar) {
+							inputIndex = j;
+							break; // Jump out of the for loop
+						}
+					}
+					if (inputIndex >= 0) {
+						output += translation[inputIndex];
+					} else {
+						// Character not in input array; discard
+					}
+				}
+				document.getElementById('password').innerHTML = 'Generated password:<br /><span class="output">'+output+'</span>';
+				document.getElementById('password').style.display = '';
+			} else {
+				// Blank the translation
+				document.getElementById('password').style.display = 'none';
+			}
+		}
+	</script>
+</head>
+<body>
+<div id="wrapper">
+<fieldset><legend>Setup</legend>
+<table id="setup">
+<tr><th>Seed:</th><td><input type="text" onkeyup="generate_hash()" id="seed" /></td></tr>
+<tr><th>Input:</th><td><input type="password" onkeyup="generate_pass()" id="passwd" /></td></tr>
+</table>
+</fieldset>
+<div id="password" style="display:none;">&nbsp;</div>
+<div id="chart">Input a seed above</div>
+</div>
+</body>
+</html>
